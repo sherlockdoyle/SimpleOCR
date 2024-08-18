@@ -1,0 +1,380 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Simple OCR</title>
+    <style>
+      * {
+        transition: all 0.3s;
+        box-sizing: border-box;
+      }
+      :root {
+        --primary-color: #169a2f;
+        --darker-primary-color: #107d24;
+        --background-color: #ffffff;
+        --text-color: #333333;
+        --button-text-color: #ffffff;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --primary-color: #1e88e5;
+          --darker-primary-color: #166ebb;
+          --background-color: #121212;
+          --text-color: #e0e0e0;
+        }
+      }
+
+      body {
+        margin: 0;
+        background-color: var(--background-color);
+        color: var(--text-color);
+        font-family: Arial, sans-serif;
+
+        & > div {
+          margin: 0 auto;
+          max-width: 600px;
+          text-align: center;
+
+          & > div {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin: 10px;
+          }
+        }
+      }
+
+      a {
+        color: var(--text-color);
+      }
+
+      button {
+        cursor: pointer;
+        border: none;
+        border-radius: 5px;
+        background-color: var(--primary-color);
+        padding: 10px 20px;
+        color: var(--button-text-color);
+        font-size: 16px;
+
+        &.secondary {
+          border: 2px solid var(--primary-color);
+          background-color: transparent;
+          padding: 8px 18px;
+        }
+
+        &[disabled] {
+          opacity: 0.5;
+          cursor: not-allowed;
+        }
+
+        &:hover:not([disabled]) {
+          background-color: var(--darker-primary-color);
+        }
+
+        &:active:not([disabled]) {
+          transform: scale(0.98);
+        }
+      }
+
+      canvas {
+        cursor: crosshair;
+        margin-top: 20px;
+        border: 2px solid var(--primary-color);
+        aspect-ratio: 1 / 1;
+        width: 100%;
+      }
+
+      ul {
+        margin: 20px 0 0 0;
+        padding: 0;
+        list-style-type: none;
+        text-align: left;
+
+        li {
+          position: relative;
+          margin-bottom: 10px;
+          border: 1px solid var(--primary-color);
+          border-radius: 5px;
+          padding: 10px;
+          min-width: 100%;
+          color: var(--button-text-color);
+
+          &::before {
+            display: block;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: -1;
+            background-color: var(--darker-primary-color);
+            width: inherit;
+            height: 100%;
+            content: '';
+          }
+
+          &::after {
+            float: right;
+            content: attr(data-confidence);
+          }
+        }
+      }
+    </style>
+  </head>
+
+  <body>
+    <div>
+      <h1>Simple OCR</h1>
+      <p><a href="">Read more about this and how this works.</a></p>
+      <button id="train">Initialize AI</button>
+      <canvas id="canvas"></canvas>
+      <div>
+        <button class="secondary" id="clear">Clear</button>
+        <button id="recognize" disabled title="Initialize AI first!">Recognize</button>
+      </div>
+      <ul id="results"></ul>
+    </div>
+
+    <script>
+      let CANVAS_SIZE = 50;
+
+      const train = document.getElementById('train');
+      const canvas = document.getElementById('canvas');
+      const recognize = document.getElementById('recognize');
+
+      /** @type {CanvasRenderingContext2D} */
+      const ctx = canvas.getContext('2d');
+      function initializeCanvas() {
+        canvas.width = canvas.clientWidth;
+        canvas.height = canvas.clientHeight;
+
+        canvas.addEventListener('touchstart', onTouchStart);
+        canvas.addEventListener('touchmove', onTouchMove);
+        canvas.addEventListener('touchend', onTouchEnd);
+        canvas.addEventListener('touchcancel', onTouchEnd);
+        canvas.addEventListener('mousedown', onMouseDown);
+        canvas.addEventListener('mousemove', onMouseMove);
+        canvas.addEventListener('mouseup', onMouseUp);
+        canvas.addEventListener('mouseout', onMouseUp);
+
+        ctx.imageSmoothingEnabled = false;
+        ctx.strokeStyle = 'black';
+        ctx.fillStyle = 'white';
+        ctx.lineCap = ctx.lineJoin = 'round';
+        ctx.lineWidth = canvas.width * 0.075;
+        ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+      }
+
+      /**
+       * @param {CanvasRenderingContext2D} ctx
+       * @returns {Uint8Array}
+       */
+      function extractData(ctx) {
+        const w = ctx.canvas.width,
+          h = ctx.canvas.height;
+        const imageData = ctx.getImageData(0, 0, w, h).data;
+        let minX = w,
+          minY = h,
+          maxX = 0,
+          maxY = 0;
+        for (let y = 0; y < h; ++y)
+          for (let x = 0; x < w; ++x) {
+            const i = (y * w + x) * 4;
+            if (imageData[i] < 127) {
+              if (x < minX) minX = x;
+              if (x > maxX) maxX = x;
+              if (y < minY) minY = y;
+              if (y > maxY) maxY = y;
+            }
+          }
+
+        const newCanvas = document.createElement('canvas');
+        newCanvas.width = newCanvas.height = CANVAS_SIZE;
+        const newCtx = newCanvas.getContext('2d');
+        newCtx.imageSmoothingEnabled = false;
+        newCtx.drawImage(
+          ctx.canvas,
+          minX - 1, // keep 1px border
+          minY - 1,
+          maxX - minX + 2,
+          maxY - minY + 2,
+          0,
+          0,
+          CANVAS_SIZE,
+          CANVAS_SIZE,
+        );
+
+        const newImageData = newCtx.getImageData(0, 0, CANVAS_SIZE, CANVAS_SIZE).data;
+        const vec = new Uint8Array(CANVAS_SIZE * CANVAS_SIZE);
+        for (let i = 0; i < vec.length; ++i) if (newImageData[i * 4] < 192) vec[i / 4] = 1;
+        return vec;
+      }
+
+      const CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+      /** @type {Record<string, Uint8Array[]>} */
+      const model = Object.fromEntries(Array.from(CHARS, char => [char, []]));
+      train.addEventListener('click', () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = canvas.height = CANVAS_SIZE;
+        const ctx = canvas.getContext('2d');
+        ctx.imageSmoothingEnabled = false;
+        for (const font of ['monospace', 'impact', 'cursive', 'serif', 'sans-serif']) {
+          ctx.font = `${Math.floor(CANVAS_SIZE * 0.8)}px ${font}`;
+          for (const char of CHARS) {
+            ctx.fillStyle = 'white';
+            ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+            ctx.fillStyle = 'black';
+            ctx.fillText(char, CANVAS_SIZE * 0.1, CANVAS_SIZE * 0.7);
+
+            model[char].push(extractData(ctx));
+          }
+        }
+
+        train.disabled = true;
+        canvas.scrollIntoView({ behavior: 'smooth' });
+        recognize.disabled = false;
+        recognize.title = '';
+        initializeCanvas();
+      });
+
+      let lastX = 0,
+        lastY = 0,
+        isDrawing = false;
+      /**
+       * @param {number} x
+       * @param {number} y
+       */
+      function drawLine(x2, y2) {
+        if (!isDrawing) return;
+
+        ctx.beginPath();
+        ctx.moveTo(lastX, lastY);
+        ctx.lineTo(x2, y2);
+        ctx.stroke();
+        lastX = x2;
+        lastY = y2;
+      }
+      /**
+       * @param {TouchEvent} e
+       */
+      function onTouchStart(e) {
+        isDrawing = true;
+
+        const rect = canvas.getBoundingClientRect();
+        lastX = e.touches[0].clientX - rect.left;
+        lastY = e.touches[0].clientY - rect.top;
+      }
+      /**
+       * @param {TouchEvent} e
+       */
+      function onTouchMove(e) {
+        const rect = canvas.getBoundingClientRect();
+        drawLine(e.touches[0].clientX - rect.left, e.touches[0].clientY - rect.top);
+
+        e.preventDefault();
+      }
+      function onTouchEnd() {
+        isDrawing = false;
+      }
+      /**
+       * @param {MouseEvent} e
+       */
+      function onMouseDown(e) {
+        isDrawing = true;
+
+        lastX = e.offsetX;
+        lastY = e.offsetY;
+      }
+      /**
+       * @param {MouseEvent} e
+       */
+      function onMouseMove(e) {
+        drawLine(e.offsetX, e.offsetY);
+      }
+      function onMouseUp() {
+        isDrawing = false;
+      }
+
+      document
+        .getElementById('clear')
+        .addEventListener('click', () => ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height));
+
+      /**
+       * @param {Uint8Array} vec1
+       * @param {Uint8Array} vec2
+       * @returns {number}
+       */
+      function match(vec1, vec2) {
+        // jaccard index
+        let intersection = 0,
+          union = 0;
+        for (let i = 0; i < vec1.length; ++i) {
+          if (vec1[i] && vec2[i]) ++intersection;
+          if (vec1[i] || vec2[i]) ++union;
+        }
+        return intersection / union;
+
+        // percentage match
+        // let same = 0;
+        // for (let i = 0; i < vec1.length; ++i) if (vec1[i] === vec2[i]) ++same;
+        // return same / vec1.length;
+
+        // cosine similarity
+        // let dot = 0,
+        //   norm1 = 0,
+        //   norm2 = 0;
+        // for (let i = 0; i < vec1.length; ++i) {
+        //   dot += vec1[i] * vec2[i];
+        //   norm1 += vec1[i] * vec1[i];
+        //   norm2 += vec2[i] * vec2[i];
+        // }
+        // return dot / (Math.sqrt(norm1) * Math.sqrt(norm2));
+      }
+      /**
+       * @param {number[]} array
+       */
+      function select(array) {
+        // median
+        // const sorted = array.sort((a, b) => a - b);
+        // if (sorted.length & 1) return sorted[(sorted.length - 1) / 2];
+        // return (sorted[sorted.length / 2 - 1] + sorted[sorted.length / 2]) / 2;
+
+        // max
+        return Math.max(...array);
+
+        // average
+        // return array.reduce((a, b) => a + b, 0) / array.length;
+      }
+
+      /**
+       * @param {string} char
+       */
+      function explain(char) {
+        let desc = '';
+        if (char >= '0' && char <= '9') desc = `Digit ${char}`;
+        else if (char === char.toUpperCase()) desc = `Uppercase ${char}/${char.toLowerCase()}`;
+        else if (char === char.toLowerCase()) desc = `Lowercase ${char.toUpperCase()}/${char}`;
+        return `${char} (${desc})`;
+      }
+
+      const results = document.getElementById('results');
+      recognize.addEventListener('click', () => {
+        const vec = extractData(ctx);
+        /** @type {Record<string, number>} */
+        const matches = Object.fromEntries(
+          Object.entries(model).map(([char, vectors]) => [char, select(vectors.map(vec2 => match(vec, vec2)))]),
+        );
+
+        results.innerHTML = '';
+        Array.from(Object.entries(matches))
+          .sort((a, b) => b[1] - a[1])
+          .forEach(([char, confidence]) => {
+            const li = document.createElement('li');
+            li.textContent = explain(char);
+            li.dataset.confidence = li.style.width = `${Math.round(confidence * 100)}%`;
+            results.appendChild(li);
+          });
+      });
+    </script>
+  </body>
+</html>
