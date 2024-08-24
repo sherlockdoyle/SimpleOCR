@@ -125,8 +125,12 @@
   <body>
     <div>
       <h1>Simple OCR</h1>
-      <p><a href="">Read more about this and how this works.</a></p>
-      <button id="train">Initialize AI</button>
+      <p>
+        <a href="https://github.com/sherlockdoyle/SimpleOCR" target="_blank">
+          Read more about this and how this works.
+        </a>
+      </p>
+      <button id="train">Initialize OCR</button>
       <canvas id="canvas"></canvas>
       <div>
         <button class="secondary" id="clear">Clear</button>
@@ -324,11 +328,11 @@
         //   norm1 = 0,
         //   norm2 = 0;
         // for (let i = 0; i < vec1.length; ++i) {
-        //   dot += vec1[i] * vec2[i];
-        //   norm1 += vec1[i] * vec1[i];
-        //   norm2 += vec2[i] * vec2[i];
+        //   dot += vec1[i] & vec2[i]; // both contains either 0 or 1, 'and' is same as 'multiplication'
+        //   norm1 += vec1[i]; // 0 * 0 = 0, 1 * 1 = 1
+        //   norm2 += vec2[i];
         // }
-        // return dot / (Math.sqrt(norm1) * Math.sqrt(norm2));
+        // return dot / Math.sqrt(norm1 * norm2);
       }
       /**
        * @param {number[]} array
